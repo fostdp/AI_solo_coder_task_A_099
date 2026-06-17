@@ -1,0 +1,20 @@
+{
+  "name": "ship-simulation-frontend",
+  "version": "1.0.0",
+  "description": "古代水密隔舱船舶抗沉性仿真与破舱稳性分析系统 - 前端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.160.0",
+    "chart.js": "^4.4.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@types/three": "^0.160.0"
+  }
+}

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>古代水密隔舱船舶抗沉性仿真与破舱稳性分析系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'SimHei', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #e8e8e8;
+            overflow: hidden;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: 60px 1fr 300px;
+            height: 100vh;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 20px;
+            color: #ffd700;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        }
+
+        .header .status {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+        }
+
+        .status-item {
+            padding: 5px 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+        }
+
+        .status-item.connected {
+            background: rgba(46, 213, 115, 0.3);
+            border: 1px solid #2ed573;
+        }
+
+        .status-item.warning {
+            background: rgba(255, 107, 107, 0.3);
+            border: 1px solid #ff6b6b;
+        }
+
+        .main-view {
+            position: relative;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .control-group {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        .control-group h3 {
+            font-size: 14px;
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 12px;
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+
+        .control-group input,
+        .control-group select,
+        .control-group button {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .control-group button {
+            cursor: pointer;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            transition: all 0.3s;
+        }
+
+        .control-group button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .control-group button.danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .side-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+        }
+
+        .panel {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel h2 {
+            font-size: 16px;
+            color: #ffd700;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        .compartment-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .compartment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            margin-bottom: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .compartment-item.flooded {
+            background: rgba(255, 107, 107, 0.3);
+            border-left: 3px solid #ff6b6b;
+        }
+
+        .compartment-item .water-bar {
+            width: 100px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .compartment-item .water-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.5s;
+        }
+
+        .alarms-panel {
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .alarm-item {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            font-size: 12px;
+            animation: slideIn 0.3s;
+        }
+
+        .alarm-item.critical {
+            background: rgba(255, 107, 107, 0.3);
+            border-left: 3px solid #ff6b6b;
+        }
+
+        .alarm-item.warning {
+            background: rgba(255, 193, 7, 0.3);
+            border-left: 3px solid #ffc107;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .charts {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+        }
+
+        .chart-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .chart-container h3 {
+            font-size: 14px;
+            color: #ffd700;
+            margin-bottom: 5px;
+        }
+
+        .chart-container canvas {
+            width: 100% !important;
+            height: calc(100% - 25px) !important;
+        }
+
+        .data-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .data-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .data-card .label {
+            font-size: 11px;
+            color: #aaa;
+            margin-bottom: 5px;
+        }
+
+        .data-card .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4facfe;
+        }
+
+        .data-card .value.danger {
+            color: #ff6b6b;
+        }
+
+        .data-card .value.success {
+            color: #2ed573;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 215, 0, 0.5);
+            border-radius: 3px;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 11px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 12px;
+            margin-right: 8px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⛵ 古代水密隔舱船舶抗沉性仿真与破舱稳性分析系统</h1>
+            <div class="status">
+                <div id="connection-status" class="status-item">连接中...</div>
+                <div id="ship-name" class="status-item">泉州宋代海船</div>
+            </div>
+        </div>
+
+        <div class="main-view">
+            <div id="canvas-container"></div>
+            <div class="controls">
+                <div class="control-group">
+                    <h3>仿真控制</h3>
+                    <label>破损舱室 (逗号分隔)</label>
+                    <input type="text" id="damage-compartments" placeholder="例如: 3,4" />
+                    <label>破损严重度 (0-1)</label>
+                    <input type="range" id="damage-severity" min="0" max="1" step="0.1" value="0.7" />
+                    <button id="simulate-btn">开始仿真</button>
+                    <button id="reset-btn" class="danger">重置状态</button>
+                </div>
+                <div class="control-group">
+                    <h3>视角控制</h3>
+                    <button id="view-side">侧视图</button>
+                    <button id="view-top">俯视图</button>
+                    <button id="view-3d">3D视图</button>
+                    <button id="animate-btn">播放进水动画</button>
+                </div>
+                <div class="control-group">
+                    <h3>隔舱优化</h3>
+                    <label>最小舱数</label>
+                    <input type="number" id="min-compartments" value="5" min="3" max="20" />
+                    <label>最大舱数</label>
+                    <input type="number" id="max-compartments" value="15" min="3" max="20" />
+                    <button id="optimize-btn">优化隔舱布局</button>
+                </div>
+            </div>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(139, 90, 43, 0.8);"></div>
+                    <span>船体结构</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(79, 172, 254, 0.5);"></div>
+                    <span>正常舱室</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(255, 107, 107, 0.7);"></div>
+                    <span>进水舱室</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(255, 215, 0, 0.8);"></div>
+                    <span>水密舱壁</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="side-panel">
+            <div class="panel">
+                <h2>📊 船舶状态</h2>
+                <div class="data-display">
+                    <div class="data-card">
+                        <div class="label">吃水深度</div>
+                        <div class="value" id="draft-value">2.80 m</div>
+                    </div>
+                    <div class="data-card">
+                        <div class="label">横倾角</div>
+                        <div class="value" id="heel-value">0.00°</div>
+                    </div>
+                    <div class="data-card">
+                        <div class="label">纵倾角</div>
+                        <div class="value" id="trim-value">0.00°</div>
+                    </div>
+                    <div class="data-card">
+                        <div class="label">初稳心高 GM</div>
+                        <div class="value success" id="gm-value">0.50 m</div>
+                    </div>
+                    <div class="data-card">
+                        <div class="label">最大复原力臂</div>
+                        <div class="value" id="gz-value">0.00 m</div>
+                    </div>
+                    <div class="data-card">
+                        <div class="label">储备浮力</div>
+                        <div class="value success" id="buoyancy-value">35.0%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>🚢 舱室状态</h2>
+                <div class="compartment-list" id="compartment-list">
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>⚠️ 告警信息</h2>
+                <div class="alarms-panel" id="alarms-panel">
+                    <div style="color: #888; font-size: 12px; text-align: center; padding: 20px;">
+                        暂无告警
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts">
+            <div class="chart-container">
+                <h3>稳心曲线 (复原力臂曲线)</h3>
+                <canvas id="stability-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>吃水变化趋势</h3>
+                <canvas id="draft-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>舱室水位监测</h3>
+                <canvas id="water-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/app.js"></script>
+</body>
+</html>
