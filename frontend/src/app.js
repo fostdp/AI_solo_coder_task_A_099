@@ -94,6 +94,7 @@ class ShipSimulationApp {
         this.scene.add(hemisphereLight);
 
         this.shipModel = new ShipModel(this.scene);
+        this.clock = new THREE.Clock();
 
         window.addEventListener('resize', () => this.onWindowResize());
 
@@ -694,9 +695,16 @@ class ShipSimulationApp {
         requestAnimationFrame(() => this.animate());
         this.controls.update();
 
-        if (this.shipModel && this.shipModel.waterPlane) {
-            const time = Date.now() * 0.001;
-            this.shipModel.waterPlane.position.y += Math.sin(time) * 0.002;
+        const dt = this.clock ? this.clock.getDelta() : 0.016;
+
+        if (this.shipModel) {
+            if (this.shipModel.updateParticles) {
+                this.shipModel.updateParticles(dt);
+            }
+            if (this.shipModel.waterPlane) {
+                const time = Date.now() * 0.001;
+                this.shipModel.waterPlane.position.y += Math.sin(time) * 0.002;
+            }
         }
 
         this.renderer.render(this.scene, this.camera);

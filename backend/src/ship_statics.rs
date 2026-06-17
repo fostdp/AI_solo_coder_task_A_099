@@ -49,26 +49,64 @@ impl ShipHydrostatics {
         moment_of_inertia / displacement
     }
 
+    pub fn calculate_free_surface_correction_tank_method(
+        &self,
+        flooded_compartments: &[u8],
+        damage_severity: f64,
+        draft: f64,
+    ) -> f64 {
+        let displacement_volume = self.calculate_displacement(draft) / SEA_WATER_DENSITY;
+        if displacement_volume <= 0.0 {
+            return 0.0;
+        }
+
+        let permeability = 0.7;
+        let fill_ratio = damage_severity.clamp(0.0, 1.0);
+
+        let mut total_free_surface_inertia = 0.0;
+        for &compartment_id in flooded_compartments {
+            let idx = compartment_id as usize;
+            if idx >= self.config.compartment_lengths.len()
+                || idx >= self.config.compartment_volumes.len()
+            {
+                continue;
+            }
+
+            let tank_length = self.config.compartment_lengths[idx];
+            let tank_volume = self.config.compartment_volumes[idx];
+            if tank_length <= 0.0 || self.config.depth <= 0.0 {
+                continue;
+            }
+
+            let tank_beam = (tank_volume / (tank_length * self.config.depth * permeability))
+                .min(self.config.beam);
+
+            let surface_inertia = tank_length * tank_beam.powi(3) / 12.0;
+
+            let surface_factor = (4.0 * fill_ratio * (1.0 - fill_ratio)).max(0.0);
+
+            total_free_surface_inertia += surface_inertia * surface_factor;
+        }
+
+        total_free_surface_inertia / displacement_volume
+    }
+
     pub fn calculate_metacentric_height_gm(
         &self,
         draft: f64,
         kg: f64,
-        flooded_volumes: &[f64],
+        flooded_compartments: &[u8],
+        damage_severity: f64,
     ) -> f64 {
         let kb = self.calculate_vertical_center_of_buoyancy(draft);
         let bm = self.calculate_metacentric_radius_bm(draft);
         let km = kb + bm;
 
-        let total_flooded_volume: f64 = flooded_volumes.iter().sum();
-        let displacement_volume = self.calculate_displacement(draft) / SEA_WATER_DENSITY;
-        let free_surface_correction = if total_flooded_volume > 0.0 {
-            let avg_compartment_beam = self.config.beam * 0.85;
-            let fse = (avg_compartment_beam.powi(3) * flooded_volumes.len() as f64)
-                / (12.0 * displacement_volume);
-            fse.min(0.1)
-        } else {
-            0.0
-        };
+        let free_surface_correction = self.calculate_free_surface_correction_tank_method(
+            flooded_compartments,
+            damage_severity,
+            draft,
+        );
 
         km - kg - free_surface_correction
     }
@@ -100,9 +138,11 @@ impl ShipHydrostatics {
         &self,
         draft: f64,
         kg: f64,
-        flooded_volumes: &[f64],
+        flooded_compartments: &[u8],
+        damage_severity: f64,
     ) -> Vec<StabilityPoint> {
-        let gm = self.calculate_metacentric_height_gm(draft, kg, flooded_volumes);
+        let gm = self
+            .calculate_metacentric_height_gm(draft, kg, flooded_compartments, damage_severity);
         let displacement = self.calculate_displacement(draft);
 
         (0..=90)
@@ -299,20 +339,10 @@ impl ShipHydrostatics {
         let draft = self.calculate_equilibrium_draft(&flooded_compartments, damage_severity);
         let kg = self.config.depth * 0.5;
 
-        let flooded_volumes: Vec<f64> = flooded_compartments
-            .iter()
-            .map(|&id| {
-                let idx = id as usize;
-                if idx < self.config.compartment_volumes.len() {
-                    self.config.compartment_volumes[idx] * damage_severity
-                } else {
-                    0.0
-                }
-            })
-            .collect();
-
-        let gm = self.calculate_metacentric_height_gm(draft, kg, &flooded_volumes);
-        let stability_curve = self.generate_stability_curve(draft, kg, &flooded_volumes);
+        let gm = self
+            .calculate_metacentric_height_gm(draft, kg, &flooded_compartments, damage_severity);
+        let stability_curve = self
+            .generate_stability_curve(draft, kg, &flooded_compartments, damage_severity);
         let displacement = self.calculate_displacement(draft);
 
         let heel_moment = self.calculate_heel_moment(&flooded_compartments, damage_severity, draft);

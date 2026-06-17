@@ -3,6 +3,10 @@ use crate::ship_statics::ShipHydrostatics;
 use rand::Rng;
 use rand_distr::{Normal, Distribution};
 
+const MIN_COMPARTMENT_LENGTH_RATIO: f64 = 0.05;
+const MAX_SCENARIO_BUDGET: usize = 40;
+const CONSTRAINT_PENALTY_WEIGHT: f64 = 10.0;
+
 pub struct GeneticOptimizer {
     base_config: ShipConfig,
     population_size: usize,
@@ -33,6 +37,67 @@ impl GeneticOptimizer {
         }
     }
 
+    fn min_compartment_length(&self) -> f64 {
+        self.base_config.length_overall * MIN_COMPARTMENT_LENGTH_RATIO
+    }
+
+    fn repair_positions(&self, positions: &mut Vec<f64>) {
+        let lo = 0.5;
+        let hi = (self.base_config.length_overall - 0.5).max(lo + 1.0);
+        let min_len = self.min_compartment_length();
+
+        for p in positions.iter_mut() {
+            *p = p.max(lo).min(hi);
+        }
+        positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        positions.dedup_by(|a, b| (a - b).abs() < 1e-6);
+
+        for i in 1..positions.len() {
+            if positions[i] - positions[i - 1] < min_len {
+                positions[i] = positions[i - 1] + min_len;
+            }
+        }
+
+        for i in (1..positions.len()).rev() {
+            if positions[i] > hi {
+                positions[i] = hi;
+            }
+            if i > 0 && positions[i] - positions[i - 1] < min_len {
+                positions[i - 1] = (positions[i] - min_len).max(lo);
+            }
+        }
+        positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    }
+
+    fn constraint_violation(&self, positions: &[f64]) -> f64 {
+        let min_len = self.min_compartment_length();
+        let lo = 0.5;
+        let hi = self.base_config.length_overall - 0.5;
+        let mut violation = 0.0;
+        let mut prev = 0.0;
+
+        for &p in positions {
+            if p < lo {
+                violation += lo - p;
+            }
+            if p > hi {
+                violation += p - hi;
+            }
+            let seg = p - prev;
+            if seg < min_len {
+                violation += min_len - seg;
+            }
+            prev = p;
+        }
+
+        let last_seg = self.base_config.length_overall - prev;
+        if last_seg < min_len {
+            violation += min_len - last_seg;
+        }
+
+        violation
+    }
+
     fn generate_random_individual(&self, num_compartments: usize) -> Individual {
         let mut rng = rand::thread_rng();
         let mut positions = Vec::with_capacity(num_compartments);
@@ -41,10 +106,10 @@ impl GeneticOptimizer {
         for i in 0..num_compartments {
             let base_pos = (i as f64 + 0.5) * segment_length;
             let variation = rng.gen_range(-segment_length * 0.2..segment_length * 0.2);
-            positions.push((base_pos + variation).max(0.5).min(self.base_config.length_overall - 0.5));
+            positions.push(base_pos + variation);
         }
 
-        positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        self.repair_positions(&mut positions);
 
         let mut individual = Individual {
             bulkhead_positions: positions,
@@ -98,21 +163,13 @@ impl GeneticOptimizer {
         let config = self.create_config_from_positions(&individual.bulkhead_positions);
         let hydrostatics = ShipHydrostatics::new(config.clone());
 
+        let scenarios = self.generate_test_scenarios(config.compartment_count as usize);
+        let total_scenarios = scenarios.len();
+
         let mut total_fitness = 0.0;
         let mut survival_count = 0;
-        let total_scenarios = (1..=2).flat_map(|n| {
-            (0..config.compartment_count as usize)
-                .combinations(n)
-                .collect::<Vec<_>>()
-                .into_iter()
-        }).count().min(50);
 
-        let max_floodable = self.calculate_max_floodable_compartments(&config, &hydrostatics);
-
-        let scenarios = self.generate_test_scenarios(config.compartment_count as usize);
-        let tested_scenarios = scenarios.into_iter().take(total_scenarios);
-
-        for scenario_compartments in tested_scenarios {
+        for scenario_compartments in scenarios {
             let scenario = FloodingScenario {
                 ship_id: config.ship_id.clone(),
                 flooded_compartments: scenario_compartments.iter().map(|&x| x as u8).collect(),
@@ -139,12 +196,13 @@ impl GeneticOptimizer {
         }
 
         let survival_probability = survival_count as f64 / total_scenarios.max(1) as f64;
-        let floodable_bonus = (max_floodable as f64 / config.compartment_count as f64) * 0.5;
         let efficiency_bonus = 1.0 / (config.compartment_count as f64).sqrt() * 0.2;
+        let constraint_penalty =
+            self.constraint_violation(&individual.bulkhead_positions) * CONSTRAINT_PENALTY_WEIGHT;
 
         individual.fitness = (total_fitness / total_scenarios.max(1) as f64)
-            + floodable_bonus
-            + efficiency_bonus;
+            + efficiency_bonus
+            - constraint_penalty;
         individual.survival_probability = survival_probability;
     }
 
@@ -155,18 +213,19 @@ impl GeneticOptimizer {
             scenarios.push(vec![i]);
         }
 
-        for i in 0..max_compartments {
-            for j in (i + 1)..max_compartments {
-                if j == i + 1 {
-                    scenarios.push(vec![i, j]);
-                }
-            }
+        for i in 0..max_compartments.saturating_sub(1) {
+            scenarios.push(vec![i, i + 1]);
         }
 
-        for i in 0..max_compartments {
-            for j in (i + 2)..max_compartments {
-                scenarios.push(vec![i, j]);
-            }
+        if scenarios.len() > MAX_SCENARIO_BUDGET {
+            let midpoint = max_compartments.min(MAX_SCENARIO_BUDGET / 2);
+            let singles: Vec<Vec<usize>> = (0..midpoint).map(|i| vec![i]).collect();
+            let pairs: Vec<Vec<usize>> = (0..midpoint)
+                .filter(|&i| i + 1 < max_compartments)
+                .map(|i| vec![i, i + 1])
+                .collect();
+            scenarios = singles.into_iter().chain(pairs.into_iter()).collect();
+            scenarios.truncate(MAX_SCENARIO_BUDGET);
         }
 
         scenarios
@@ -217,7 +276,7 @@ impl GeneticOptimizer {
         child_positions.extend_from_slice(&parent1.bulkhead_positions[..crossover_point]);
         child_positions.extend_from_slice(&parent2.bulkhead_positions[crossover_point..]);
 
-        child_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        self.repair_positions(&mut child_positions);
 
         let mut child = Individual {
             bulkhead_positions: child_positions,
@@ -238,13 +297,11 @@ impl GeneticOptimizer {
         for i in 0..positions.len() {
             if rng.gen_bool(self.mutation_rate) {
                 let delta = normal.sample(&mut rng);
-                positions[i] = (positions[i] + delta)
-                    .max(0.5)
-                    .min(self.base_config.length_overall - 0.5);
+                positions[i] += delta;
             }
         }
 
-        positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        self.repair_positions(&mut positions);
 
         let mut mutated = Individual {
             bulkhead_positions: positions,
@@ -351,42 +408,5 @@ impl GeneticOptimizer {
             configuration: best.bulkhead_positions.clone(),
             best_configurations: best_configs,
         }
-    }
-}
-
-trait Combinations {
-    fn combinations(self, n: usize) -> Vec<Vec<usize>>;
-}
-
-impl Combinations for std::ops::Range<usize> {
-    fn combinations(self, n: usize) -> Vec<Vec<usize>> {
-        let items: Vec<usize> = self.collect();
-        let mut result = Vec::new();
-
-        if n == 0 || n > items.len() {
-            return result;
-        }
-
-        let mut indices: Vec<usize> = (0..n).collect();
-        result.push(indices.iter().map(|&i| items[i]).collect());
-
-        loop {
-            let mut i = n as isize - 1;
-            while i >= 0 && indices[i as usize] == items.len() - n + i as usize {
-                i -= 1;
-            }
-
-            if i < 0 {
-                break;
-            }
-
-            indices[i as usize] += 1;
-            for j in (i as usize + 1)..n {
-                indices[j] = indices[j - 1] + 1;
-            }
-            result.push(indices.iter().map(|&i| items[i]).collect());
-        }
-
-        result
     }
 }
