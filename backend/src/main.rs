@@ -4,26 +4,31 @@ mod compartment_optimizer;
 mod dtu_receiver;
 mod flooding_simulator;
 mod handlers;
+mod metrics;
 mod models;
 
 use actix::prelude::*;
 use actix_cors::Cors;
 use actix_web::{web, App, HttpServer};
-use log::info;
 use std::env;
 use tokio::sync::mpsc;
 
 use crate::alarm_ws::{AlarmCommand, AlarmWs, WsServer};
 use crate::clickhouse_client::ClickHouseClient;
 use crate::compartment_optimizer::{CompartmentOptimizer, OptimizeCommand};
-use crate::dtu_receiver::{DtuReceiver, SensorCommand};
+use crate::dtu_receiver::{run_mqtt_subscriber, DtuReceiver, SensorCommand};
 use crate::flooding_simulator::{FloodingSimulator, SimCommand};
 use crate::handlers::*;
 use crate::models::*;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
     let clickhouse_url = env::var("CLICKHOUSE_URL")
         .unwrap_or_else(|_| "tcp://localhost:9000?compression=lz4".to_string());
@@ -35,11 +40,19 @@ async fn main() -> std::io::Result<()> {
     let damage_params_path = env::var("DAMAGE_PARAMS_PATH")
         .unwrap_or_else(|_| "config/damage_params.json".to_string());
 
+    let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let mqtt_port: u16 = env::var("MQTT_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1883);
+    let mqtt_topic = env::var("MQTT_TOPIC")
+        .unwrap_or_else(|_| "ship/+/sensors".to_string());
+
     let default_config: ShipConfig = std::fs::read_to_string(&config_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| {
-            log::warn!(
+            tracing::warn!(
                 "Failed to load ship config from {}, using fallback",
                 config_path
             );
@@ -51,15 +64,15 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    info!("Connecting to ClickHouse at: {}", clickhouse_url);
+    tracing::info!("Connecting to ClickHouse at: {}", clickhouse_url);
 
     let clickhouse_client = match ClickHouseClient::new(&clickhouse_url).await {
         Ok(client) => {
-            info!("Successfully connected to ClickHouse");
+            tracing::info!("Successfully connected to ClickHouse");
             client
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "Failed to connect to ClickHouse: {}. Continuing without database persistence.",
                 e
             );
@@ -103,7 +116,16 @@ async fn main() -> std::io::Result<()> {
     );
     tokio::spawn(alarm_ws.run());
 
-    info!("All service tasks spawned: dtu_receiver, flooding_simulator, compartment_optimizer, alarm_ws");
+    tokio::spawn(run_mqtt_subscriber(
+        mqtt_host,
+        mqtt_port,
+        mqtt_topic,
+        sensor_tx.clone(),
+    ));
+
+    tracing::info!(
+        "All service tasks spawned: dtu_receiver, flooding_simulator, compartment_optimizer, alarm_ws, mqtt_subscriber"
+    );
 
     let app_state = web::Data::new(AppState {
         sensor_tx,
@@ -114,7 +136,7 @@ async fn main() -> std::io::Result<()> {
         default_config,
     });
 
-    info!("Starting server on {}:{}", server_host, server_port);
+    tracing::info!("Starting server on {}:{}", server_host, server_port);
 
     HttpServer::new(move || {
         let cors = Cors::permissive();
@@ -123,6 +145,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .app_data(app_state.clone())
             .route("/health", web::get().to(health_check))
+            .route("/metrics", web::get().to(metrics_handler))
             .route("/api/config/default", web::get().to(default_ship_config))
             .route("/api/config/{ship_id}", web::get().to(get_ship_config))
             .route("/api/sensor/{ship_id}", web::get().to(get_sensor_data))
@@ -137,7 +160,7 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await?;
 
-    info!("Server stopped");
+    tracing::info!("Server stopped");
     Ok(())
 }
 

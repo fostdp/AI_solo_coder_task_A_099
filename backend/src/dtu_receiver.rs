@@ -1,6 +1,9 @@
 use crate::alarm_ws::AlarmCommand;
 use crate::clickhouse_client::ClickHouseClient;
+use crate::metrics;
 use crate::models::*;
+use rumqttc::{AsyncClient, MqttOptions, QoS};
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 pub enum SensorCommand {
@@ -35,7 +38,7 @@ impl DtuReceiver {
     }
 
     pub async fn run(mut self) {
-        log::info!("DtuReceiver task started");
+        tracing::info!("DtuReceiver task started");
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
                 SensorCommand::Ingest { data, reply } => {
@@ -56,7 +59,7 @@ impl DtuReceiver {
                 }
             }
         }
-        log::info!("DtuReceiver task stopped");
+        tracing::info!("DtuReceiver task stopped");
     }
 
     async fn handle_ingest(&self, data: Vec<SensorData>) -> Result<usize, String> {
@@ -70,6 +73,7 @@ impl DtuReceiver {
             .map_err(|e| e.to_string())?;
 
         let count = data.len();
+        metrics::SENSOR_INGESTED_TOTAL.inc_by(count as u64);
         let _ = self
             .alarm_tx
             .send(AlarmCommand::BroadcastSensorData { data })
@@ -96,4 +100,66 @@ impl DtuReceiver {
         }
         Ok(())
     }
+}
+
+pub async fn run_mqtt_subscriber(
+    host: String,
+    port: u16,
+    topic: String,
+    sensor_tx: mpsc::Sender<SensorCommand>,
+) {
+    let client_id = format!("backend-mqtt-sub-{}", std::process::id());
+    let mut options = MqttOptions::new(client_id, host, port);
+    options.set_keep_alive(Duration::from_secs(30));
+    options.set_clean_session(true);
+
+    let (client, mut connection) = AsyncClient::new(options, 10);
+
+    match client.subscribe(&topic, QoS::AtLeastOnce).await {
+        Ok(_) => tracing::info!("MQTT subscribed to topic: {}", topic),
+        Err(e) => {
+            tracing::error!("Failed to subscribe to MQTT topic {}: {}", topic, e);
+            metrics::MQTT_ERRORS.inc();
+            return;
+        }
+    }
+
+    tokio::task::spawn_blocking(move || loop {
+        match connection.recv() {
+            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(p)))) => {
+                metrics::MQTT_MESSAGES.inc();
+                match serde_json::from_slice::<SensorData>(p.payload.as_ref()) {
+                    Ok(sensor) => {
+                        tracing::debug!(
+                            "MQTT sensor: ship={} draft={:.2}",
+                            sensor.ship_id,
+                            sensor.draft
+                        );
+                        let (tx, rx) = oneshot::channel();
+                        if sensor_tx
+                            .blocking_send(SensorCommand::Ingest {
+                                data: vec![sensor],
+                                reply: tx,
+                            })
+                            .is_ok()
+                        {
+                            let _ = rx.blocking_recv();
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to parse MQTT payload: {}", e);
+                    }
+                }
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                metrics::MQTT_ERRORS.inc();
+                tracing::error!("MQTT connection error: {}", e);
+            }
+            Err(_) => {
+                tracing::error!("MQTT request channel closed, stopping subscriber");
+                break;
+            }
+        }
+    });
 }

@@ -1,4 +1,5 @@
 use crate::clickhouse_client::ClickHouseClient;
+use crate::metrics;
 use crate::models::*;
 use actix::*;
 use parking_lot::Mutex;
@@ -63,7 +64,8 @@ impl Handler<Connect> for WsServer {
         let id = self.next_id;
         self.next_id += 1;
         self.sessions.lock().push((id, msg.addr, msg.ship_id));
-        log::info!("New WebSocket connection: {}", id);
+        tracing::info!("New WebSocket connection: {}", id);
+        metrics::WS_CONNECTIONS.inc();
         id
     }
 }
@@ -73,7 +75,8 @@ impl Handler<Disconnect> for WsServer {
 
     fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
         self.sessions.lock().retain(|(id, _, _)| *id != msg.id);
-        log::info!("WebSocket disconnected: {}", msg.id);
+        tracing::info!("WebSocket disconnected: {}", msg.id);
+        metrics::WS_CONNECTIONS.dec();
     }
 }
 
@@ -241,7 +244,7 @@ impl AlarmWs {
     }
 
     pub async fn run(mut self) {
-        log::info!("AlarmWs task started");
+        tracing::info!("AlarmWs task started");
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
                 AlarmCommand::EvaluateResult { result, config } => {
@@ -249,8 +252,9 @@ impl AlarmWs {
                         check_alarm_conditions(&result, &config, &self.damage_params)
                     {
                         if let Err(e) = self.clickhouse.insert_alarm_event(&alarm).await {
-                            log::error!("Failed to insert alarm: {}", e);
+                            tracing::error!("Failed to insert alarm: {}", e);
                         }
+                        metrics::ALARMS_TOTAL.inc();
                         self.ws_server.do_send(BroadcastAlarm(alarm));
                     }
                     self.ws_server.do_send(BroadcastSimResult(result));
@@ -260,6 +264,6 @@ impl AlarmWs {
                 }
             }
         }
-        log::info!("AlarmWs task stopped");
+        tracing::info!("AlarmWs task stopped");
     }
 }

@@ -1,5 +1,6 @@
 use crate::clickhouse_client::ClickHouseClient;
 use crate::flooding_simulator::ShipHydrostatics;
+use crate::metrics;
 use crate::models::*;
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -381,7 +382,7 @@ impl CompartmentOptimizer {
     }
 
     pub async fn run(mut self) {
-        log::info!("CompartmentOptimizer task started");
+        tracing::info!("CompartmentOptimizer task started");
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
                 OptimizeCommand::Optimize { request, reply } => {
@@ -390,13 +391,14 @@ impl CompartmentOptimizer {
                 }
             }
         }
-        log::info!("CompartmentOptimizer task stopped");
+        tracing::info!("CompartmentOptimizer task stopped");
     }
 
     async fn handle_optimize(
         &self,
         request: OptimizationRequest,
     ) -> Result<OptimizationResult, String> {
+        metrics::OPTIMIZATIONS_TOTAL.inc();
         let config = self
             .clickhouse
             .get_ship_config(&request.ship_id)
@@ -419,7 +421,7 @@ impl CompartmentOptimizer {
         );
 
         if let Err(e) = self.clickhouse.insert_optimization_result(&result).await {
-            log::error!("Failed to insert optimization result: {}", e);
+            tracing::error!("Failed to insert optimization result: {}", e);
         }
 
         Ok(result)

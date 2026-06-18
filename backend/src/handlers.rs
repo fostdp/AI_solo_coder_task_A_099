@@ -28,6 +28,12 @@ pub async fn health_check() -> impl Responder {
     }))
 }
 
+pub async fn metrics_handler() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4; charset=utf-8")
+        .body(crate::metrics::render())
+}
+
 pub async fn default_ship_config(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(&state.default_config)
 }
@@ -234,7 +240,7 @@ impl WsSession {
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
             if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
-                log::warn!("WebSocket client heartbeat failed, disconnecting");
+                tracing::warn!("WebSocket client heartbeat failed, disconnecting");
                 ctx.stop();
                 return;
             }
@@ -257,12 +263,12 @@ impl Actor for WsSession {
             })
             .wait()
             .unwrap_or(0);
-        log::info!("WebSocket connection started: {}", self.id);
+        tracing::info!("WebSocket connection started: {}", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         self.ws_server.do_send(Disconnect { id: self.id });
-        log::info!("WebSocket connection closed: {}", self.id);
+        tracing::info!("WebSocket connection closed: {}", self.id);
     }
 }
 
@@ -282,7 +288,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                     if msg.message_type == "subscribe" {
                         if let Some(ship_id) = msg.data.as_str() {
                             self.ship_id = Some(ship_id.to_string());
-                            log::info!("Client {} subscribed to ship: {}", self.id, ship_id);
+                            tracing::info!("Client {} subscribed to ship: {}", self.id, ship_id);
                         }
                     }
                 }

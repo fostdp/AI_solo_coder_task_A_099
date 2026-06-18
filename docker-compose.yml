@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      - CLICKHOUSE_URL=tcp://clickhouse:9000?compression=lz4
+      - MQTT_HOST=mqtt
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ship/+/sensors
+      - SHIP_CONFIG_PATH=/app/config/ship_config.json
+      - DAMAGE_PARAMS_PATH=/app/config/damage_params.json
+      - RUST_LOG=info
+    restart: unless-stopped
+
+  simulator:
+    build: ./simulator
+    depends_on:
+      mqtt:
+        condition: service_started
+      backend:
+        condition: service_started
+    environment:
+      - MQTT_HOST=mqtt
+      - MQTT_PORT=1883
+      - SHIP_ID=quanzhou_song_001
+      - DAMAGE_LOCATION=5
+      - COMPARTMENT_COUNT=13
+      - SEVERITY=0.6
+      - INTERVAL=2
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  clickhouse-data:

@@ -53,6 +53,7 @@ pub struct FloodingScenario {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StabilityResult {
     pub simulation_id: Uuid,
+    pub ship_id: String,
     pub timestamp: DateTime<Utc>,
     pub flooded_compartments: Vec<u8>,
     pub final_draft: f64,

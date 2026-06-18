@@ -77,7 +77,7 @@ impl ClickHouseClient {
 
     pub async fn insert_simulation_result(&self, result: &StabilityResult) -> Result<(), Box<dyn std::error::Error>> {
         let mut block = Block::new();
-        block = block.add_column("simulation_id", vec![result.simulation_id])?;
+        block = block.add_column("simulation_id", vec![result.simulation_id.to_string()])?;
         block = block.add_column("ship_id", vec![result.ship_id.clone()])?;
         block = block.add_column("timestamp", vec![result.timestamp])?;
         block = block.add_column("flooded_compartments", vec![result.flooded_compartments.clone()])?;
@@ -101,13 +101,13 @@ impl ClickHouseClient {
     pub async fn insert_stability_curve(&self, simulation_id: Uuid, curve: &[StabilityPoint]) -> Result<(), Box<dyn std::error::Error>> {
         let mut block = Block::new();
 
-        let mut sim_ids: Vec<Uuid> = Vec::new();
+        let mut sim_ids: Vec<String> = Vec::new();
         let mut heel_angles: Vec<f64> = Vec::new();
         let mut righting_arms: Vec<f64> = Vec::new();
         let mut righting_moments: Vec<f64> = Vec::new();
 
         for point in curve {
-            sim_ids.push(simulation_id);
+            sim_ids.push(simulation_id.to_string());
             heel_angles.push(point.heel_angle);
             righting_arms.push(point.righting_arm);
             righting_moments.push(point.righting_moment);
@@ -125,7 +125,7 @@ impl ClickHouseClient {
 
     pub async fn insert_alarm_event(&self, alarm: &AlarmEvent) -> Result<(), Box<dyn std::error::Error>> {
         let mut block = Block::new();
-        block = block.add_column("alarm_id", vec![alarm.alarm_id])?;
+        block = block.add_column("alarm_id", vec![alarm.alarm_id.to_string()])?;
         block = block.add_column("ship_id", vec![alarm.ship_id.clone()])?;
         block = block.add_column("timestamp", vec![alarm.timestamp])?;
         block = block.add_column("alarm_type", vec![alarm_type_to_string(&alarm.alarm_type)])?;
@@ -142,7 +142,7 @@ impl ClickHouseClient {
 
     pub async fn insert_optimization_result(&self, result: &OptimizationResult) -> Result<(), Box<dyn std::error::Error>> {
         let mut block = Block::new();
-        block = block.add_column("optimization_id", vec![result.optimization_id])?;
+        block = block.add_column("optimization_id", vec![result.optimization_id.to_string()])?;
         block = block.add_column("ship_id", vec![result.ship_id.clone()])?;
         block = block.add_column("timestamp", vec![result.timestamp])?;
         block = block.add_column("compartment_count", vec![result.compartment_count])?;
@@ -239,8 +239,11 @@ impl ClickHouseClient {
             let alarm_type_str: String = row.get("alarm_type")?;
             let alarm_level_str: String = row.get("alarm_level")?;
 
+            let alarm_id_str: String = row.get("alarm_id")?;
+            let alarm_id = Uuid::parse_str(&alarm_id_str).unwrap_or_default();
+
             result.push(AlarmEvent {
-                alarm_id: row.get("alarm_id")?,
+                alarm_id,
                 ship_id: row.get("ship_id")?,
                 timestamp: row.get("timestamp")?,
                 alarm_type: string_to_alarm_type(&alarm_type_str),

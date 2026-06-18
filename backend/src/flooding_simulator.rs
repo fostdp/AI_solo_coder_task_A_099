@@ -1,5 +1,6 @@
 use crate::alarm_ws::AlarmCommand;
 use crate::clickhouse_client::ClickHouseClient;
+use crate::metrics;
 use crate::models::*;
 use tokio::sync::{mpsc, oneshot};
 
@@ -353,6 +354,7 @@ impl ShipHydrostatics {
 
         StabilityResult {
             simulation_id: uuid::Uuid::new_v4(),
+            ship_id: self.config.ship_id.clone(),
             timestamp: chrono::Utc::now(),
             flooded_compartments,
             final_draft: draft,
@@ -419,7 +421,7 @@ impl FloodingSimulator {
     }
 
     pub async fn run(mut self) {
-        log::info!("FloodingSimulator task started");
+        tracing::info!("FloodingSimulator task started");
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
                 SimCommand::Simulate { scenario, reply } => {
@@ -437,10 +439,11 @@ impl FloodingSimulator {
                 }
             }
         }
-        log::info!("FloodingSimulator task stopped");
+        tracing::info!("FloodingSimulator task stopped");
     }
 
     async fn handle_simulate(&self, scenario: &FloodingScenario) -> Result<StabilityResult, String> {
+        metrics::SIMULATIONS_TOTAL.inc();
         let config = self
             .clickhouse
             .get_ship_config(&scenario.ship_id)
@@ -452,7 +455,7 @@ impl FloodingSimulator {
         let result = hydrostatics.simulate_damage(scenario);
 
         if let Err(e) = self.clickhouse.insert_simulation_result(&result).await {
-            log::error!("Failed to insert simulation result: {}", e);
+            tracing::error!("Failed to insert simulation result: {}", e);
         }
 
         let _ = self
