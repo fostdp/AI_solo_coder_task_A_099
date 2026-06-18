@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const COMPARTMENT_NAMES = [
     "艏尖舱", "前货舱1", "前货舱2", "中货舱1", "中货舱2",
@@ -148,7 +149,7 @@ class FloodParticleSystem {
     }
 }
 
-export class ShipModel {
+class ShipModel {
     constructor(scene) {
         this.scene = scene;
         this.shipGroup = new THREE.Group();
@@ -654,5 +655,175 @@ export class ShipModel {
         if (this.particleSystem) {
             this.particleSystem.clear();
         }
+    }
+}
+
+export class JunkShip3D {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
+        this.shipModel = null;
+        this.clock = new THREE.Clock();
+
+        this.initScene();
+        this.initLights();
+        this.shipModel = new ShipModel(this.scene);
+        this.initResize();
+        this.animate();
+    }
+
+    initScene() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x87ceeb);
+        this.scene.fog = new THREE.Fog(0x87ceeb, 50, 200);
+
+        this.camera = new THREE.PerspectiveCamera(
+            60,
+            this.container.clientWidth / this.container.clientHeight,
+            0.1,
+            1000
+        );
+        this.camera.position.set(40, 25, 40);
+
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.container.appendChild(this.renderer.domElement);
+
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
+        this.controls.minDistance = 20;
+        this.controls.maxDistance = 100;
+        this.controls.maxPolarAngle = Math.PI / 2 - 0.1;
+    }
+
+    initLights() {
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        this.scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(50, 100, 50);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+        directionalLight.shadow.camera.left = -100;
+        directionalLight.shadow.camera.right = 100;
+        directionalLight.shadow.camera.top = 100;
+        directionalLight.shadow.camera.bottom = -100;
+        this.scene.add(directionalLight);
+
+        const hemisphereLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5c5c, 0.4);
+        this.scene.add(hemisphereLight);
+    }
+
+    initResize() {
+        window.addEventListener('resize', () => this.onWindowResize());
+    }
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        this.controls.update();
+
+        const dt = this.clock.getDelta();
+
+        if (this.shipModel) {
+            this.shipModel.updateParticles(dt);
+
+            if (this.shipModel.waterPlane) {
+                const time = Date.now() * 0.001;
+                this.shipModel.waterPlane.position.y += Math.sin(time) * 0.002;
+            }
+        }
+
+        this.renderer.render(this.scene, this.camera);
+    }
+
+    onWindowResize() {
+        this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+
+    setView(mode) {
+        const duration = 1000;
+        const startPos = this.camera.position.clone();
+        const startTarget = this.controls.target.clone();
+
+        let endPos, endTarget;
+
+        switch (mode) {
+            case 'side':
+                endPos = new THREE.Vector3(0, 10, 60);
+                endTarget = new THREE.Vector3(0, 0, 0);
+                break;
+            case 'top':
+                endPos = new THREE.Vector3(0, 80, 0.1);
+                endTarget = new THREE.Vector3(0, 0, 0);
+                break;
+            case '3d':
+                endPos = new THREE.Vector3(40, 25, 40);
+                endTarget = new THREE.Vector3(0, 0, 0);
+                break;
+            default:
+                return;
+        }
+
+        const startTime = Date.now();
+
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const ease = 1 - Math.pow(1 - progress, 3);
+
+            this.camera.position.lerpVectors(startPos, endPos, ease);
+            this.controls.target.lerpVectors(startTarget, endTarget, ease);
+            this.controls.update();
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            }
+        };
+
+        animate();
+    }
+
+    updateWaterLevel(compartmentIndex, waterLevel, maxLevel) {
+        this.shipModel.updateWaterLevel(compartmentIndex, waterLevel, maxLevel);
+    }
+
+    setFlooded(compartmentIndex, isFlooded) {
+        this.shipModel.setFlooded(compartmentIndex, isFlooded);
+    }
+
+    updateShipPose(draft, heelAngle, trimAngle) {
+        this.shipModel.updateShipPose(draft, heelAngle, trimAngle);
+    }
+
+    startFloodingAnimation(floodedCompartments, targetLevels, duration) {
+        this.shipModel.startFloodingAnimation(floodedCompartments, targetLevels, duration);
+    }
+
+    reset() {
+        this.shipModel.reset();
+    }
+
+    setCompartmentConfiguration(bulkheadPositions) {
+        this.shipModel.setCompartmentConfiguration(bulkheadPositions);
+    }
+
+    getCompartmentName(index) {
+        return this.shipModel.getCompartmentName(index);
+    }
+
+    getCompartmentCount() {
+        return this.shipModel.getCompartmentCount();
     }
 }

@@ -1,0 +1,18 @@
+{
+    "gravity": 9.81,
+    "sea_water_density": 1025.0,
+    "permeability": 0.7,
+    "min_metacentric_height": 0.15,
+    "max_safe_heel_angle": 15.0,
+    "min_reserve_buoyancy": 10.0,
+    "draft_depth_ratio_threshold": 0.9,
+    "flooding_spread_count": 3,
+    "block_coefficient_base": 0.68,
+    "block_coefficient_draft_factor": 0.08,
+    "waterplane_coefficient_base": 0.75,
+    "waterplane_coefficient_draft_factor": 0.05,
+    "hull_form_factor": 0.7,
+    "damage_orifice_area_coefficient": 0.5,
+    "sinking_time_threshold_seconds": 3600.0,
+    "max_safe_draft_depth_ratio": 0.95
+}

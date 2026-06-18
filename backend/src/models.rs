@@ -137,3 +137,46 @@ pub struct WebSocketMessage {
     pub message_type: String,
     pub data: serde_json::Value,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DamageParams {
+    pub gravity: f64,
+    pub sea_water_density: f64,
+    pub permeability: f64,
+    pub min_metacentric_height: f64,
+    pub max_safe_heel_angle: f64,
+    pub min_reserve_buoyancy: f64,
+    pub draft_depth_ratio_threshold: f64,
+    pub flooding_spread_count: usize,
+    pub block_coefficient_base: f64,
+    pub block_coefficient_draft_factor: f64,
+    pub waterplane_coefficient_base: f64,
+    pub waterplane_coefficient_draft_factor: f64,
+    pub hull_form_factor: f64,
+    pub damage_orifice_area_coefficient: f64,
+    pub sinking_time_threshold_seconds: f64,
+    pub max_safe_draft_depth_ratio: f64,
+}
+
+impl Default for DamageParams {
+    fn default() -> Self {
+        Self {
+            gravity: 9.81,
+            sea_water_density: 1025.0,
+            permeability: 0.7,
+            min_metacentric_height: 0.15,
+            max_safe_heel_angle: 15.0,
+            min_reserve_buoyancy: 10.0,
+            draft_depth_ratio_threshold: 0.9,
+            flooding_spread_count: 3,
+            block_coefficient_base: 0.68,
+            block_coefficient_draft_factor: 0.08,
+            waterplane_coefficient_base: 0.75,
+            waterplane_coefficient_draft_factor: 0.05,
+            hull_form_factor: 0.7,
+            damage_orifice_area_coefficient: 0.5,
+            sinking_time_threshold_seconds: 3600.0,
+            max_safe_draft_depth_ratio: 0.95,
+        }
+    }
+}

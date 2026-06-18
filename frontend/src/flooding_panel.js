@@ -1,7 +1,5 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Chart, registerables } from 'chart.js';
-import { ShipModel } from './shipModel.js';
+import { JunkShip3D } from './junk_ship_3d.js';
 
 Chart.register(...registerables);
 
@@ -14,13 +12,9 @@ const COMPARTMENT_NAMES = [
     "艉尖舱", "淡水舱1", "淡水舱2"
 ];
 
-class ShipSimulationApp {
+class FloodingPanel {
     constructor() {
-        this.scene = null;
-        this.camera = null;
-        this.renderer = null;
-        this.controls = null;
-        this.shipModel = null;
+        this.ship3D = null;
         this.stabilityChart = null;
         this.draftChart = null;
         this.waterChart = null;
@@ -37,67 +31,11 @@ class ShipSimulationApp {
     }
 
     init() {
-        this.initThreeJS();
+        this.ship3D = new JunkShip3D('canvas-container');
         this.initCharts();
         this.initWebSocket();
         this.initUI();
         this.loadShipConfig();
-        this.animate();
-    }
-
-    initThreeJS() {
-        const container = document.getElementById('canvas-container');
-
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87ceeb);
-        this.scene.fog = new THREE.Fog(0x87ceeb, 50, 200);
-
-        this.camera = new THREE.PerspectiveCamera(
-            60,
-            container.clientWidth / container.clientHeight,
-            0.1,
-            1000
-        );
-        this.camera.position.set(40, 25, 40);
-
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.renderer.setSize(container.clientWidth, container.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        container.appendChild(this.renderer.domElement);
-
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.05;
-        this.controls.minDistance = 20;
-        this.controls.maxDistance = 100;
-        this.controls.maxPolarAngle = Math.PI / 2 - 0.1;
-
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        this.scene.add(ambientLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(50, 100, 50);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 2048;
-        directionalLight.shadow.mapSize.height = 2048;
-        directionalLight.shadow.camera.near = 0.5;
-        directionalLight.shadow.camera.far = 500;
-        directionalLight.shadow.camera.left = -100;
-        directionalLight.shadow.camera.right = 100;
-        directionalLight.shadow.camera.top = 100;
-        directionalLight.shadow.camera.bottom = -100;
-        this.scene.add(directionalLight);
-
-        const hemisphereLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5c5c, 0.4);
-        this.scene.add(hemisphereLight);
-
-        this.shipModel = new ShipModel(this.scene);
-        this.clock = new THREE.Clock();
-
-        window.addEventListener('resize', () => this.onWindowResize());
-
         this.initCompartmentList();
     }
 
@@ -302,11 +240,11 @@ class ShipSimulationApp {
         this.updateDraftHistory(first);
 
         data.forEach(d => {
-            this.shipModel.updateWaterLevel(d.compartment_id, d.water_level, d.max_water_level);
-            this.shipModel.setFlooded(d.compartment_id, d.is_flooded);
+            this.ship3D.updateWaterLevel(d.compartment_id, d.water_level, d.max_water_level);
+            this.ship3D.setFlooded(d.compartment_id, d.is_flooded);
         });
 
-        this.shipModel.updateShipPose(first.draft, first.heel_angle, first.trim_angle);
+        this.ship3D.updateShipPose(first.draft, first.heel_angle, first.trim_angle);
     }
 
     handleSimulationResult(result) {
@@ -336,7 +274,7 @@ class ShipSimulationApp {
 
         if (result.flooded_compartments) {
             const targetLevels = result.flooded_compartments.map(() => 2.5);
-            this.shipModel.startFloodingAnimation(result.flooded_compartments, targetLevels, 5000);
+            this.ship3D.startFloodingAnimation(result.flooded_compartments, targetLevels, 5000);
         }
     }
 
@@ -403,9 +341,9 @@ class ShipSimulationApp {
         document.getElementById('animate-btn').addEventListener('click', () => this.playDemoAnimation());
         document.getElementById('optimize-btn').addEventListener('click', () => this.runOptimization());
 
-        document.getElementById('view-side').addEventListener('click', () => this.setView('side'));
-        document.getElementById('view-top').addEventListener('click', () => this.setView('top'));
-        document.getElementById('view-3d').addEventListener('click', () => this.setView('3d'));
+        document.getElementById('view-side').addEventListener('click', () => this.ship3D.setView('side'));
+        document.getElementById('view-top').addEventListener('click', () => this.ship3D.setView('top'));
+        document.getElementById('view-3d').addEventListener('click', () => this.ship3D.setView('3d'));
     }
 
     async loadShipConfig() {
@@ -484,7 +422,7 @@ class ShipSimulationApp {
             console.log('Optimization result:', result);
 
             if (result.configuration && result.configuration.length > 0) {
-                this.shipModel.setCompartmentConfiguration(result.configuration);
+                this.ship3D.setCompartmentConfiguration(result.configuration);
                 alert(`优化完成！\n最优舱数: ${result.compartment_count}\n适应度: ${result.fitness_score.toFixed(4)}\n生存概率: ${(result.survival_probability * 100).toFixed(1)}%`);
             }
         } catch (e) {
@@ -497,7 +435,7 @@ class ShipSimulationApp {
     }
 
     resetShip() {
-        this.shipModel.reset();
+        this.ship3D.reset();
         this.alarms = [];
         this.updateAlarmDisplay();
         this.draftHistory = [];
@@ -524,48 +462,7 @@ class ShipSimulationApp {
     playDemoAnimation() {
         const compartments = [3, 4];
         const levels = [2.0, 2.5];
-        this.shipModel.startFloodingAnimation(compartments, levels, 6000);
-    }
-
-    setView(mode) {
-        const duration = 1000;
-        const startPos = this.camera.position.clone();
-        const startTarget = this.controls.target.clone();
-
-        let endPos, endTarget;
-
-        switch (mode) {
-            case 'side':
-                endPos = new THREE.Vector3(0, 10, 60);
-                endTarget = new THREE.Vector3(0, 0, 0);
-                break;
-            case 'top':
-                endPos = new THREE.Vector3(0, 80, 0.1);
-                endTarget = new THREE.Vector3(0, 0, 0);
-                break;
-            case '3d':
-                endPos = new THREE.Vector3(40, 25, 40);
-                endTarget = new THREE.Vector3(0, 0, 0);
-                break;
-        }
-
-        const startTime = Date.now();
-
-        const animate = () => {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const ease = 1 - Math.pow(1 - progress, 3);
-
-            this.camera.position.lerpVectors(startPos, endPos, ease);
-            this.controls.target.lerpVectors(startTarget, endTarget, ease);
-            this.controls.update();
-
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            }
-        };
-
-        animate();
+        this.ship3D.startFloodingAnimation(compartments, levels, 6000);
     }
 
     updateConnectionStatus(connected) {
@@ -683,34 +580,8 @@ class ShipSimulationApp {
 
         this.draftChart.update();
     }
-
-    onWindowResize() {
-        const container = document.getElementById('canvas-container');
-        this.camera.aspect = container.clientWidth / container.clientHeight;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(container.clientWidth, container.clientHeight);
-    }
-
-    animate() {
-        requestAnimationFrame(() => this.animate());
-        this.controls.update();
-
-        const dt = this.clock ? this.clock.getDelta() : 0.016;
-
-        if (this.shipModel) {
-            if (this.shipModel.updateParticles) {
-                this.shipModel.updateParticles(dt);
-            }
-            if (this.shipModel.waterPlane) {
-                const time = Date.now() * 0.001;
-                this.shipModel.waterPlane.position.y += Math.sin(time) * 0.002;
-            }
-        }
-
-        this.renderer.render(this.scene, this.camera);
-    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    new ShipSimulationApp();
+    new FloodingPanel();
 });
